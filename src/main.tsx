@@ -10,6 +10,8 @@ import './detail.css'
 import './detail-layout.css'
 import './workspace.css'
 import './session-nav.css'
+import './start-redesign.css'
+import './start-grid.css'
 import App from './App'
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>)
