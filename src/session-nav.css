@@ -1,0 +1,1 @@
+.canvas-menu{top:78px;display:flex;gap:6px}.canvas-return{display:grid;place-items:center;width:36px;height:36px;border:1px solid #d8ddd4;background:#f8faf7cc;backdrop-filter:blur(10px);color:#456047;cursor:pointer;box-shadow:0 5px 16px #26352612}.canvas-return:hover,.menu-toggle:hover{background:#e8eee5}.canvas-menu .menu-popover{top:43px;left:42px}

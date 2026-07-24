@@ -9,6 +9,7 @@ import './focus.css'
 import './detail.css'
 import './detail-layout.css'
 import './workspace.css'
+import './session-nav.css'
 import App from './App'
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>)
