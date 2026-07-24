@@ -6,6 +6,7 @@ import './motion.css'
 import './canvas.css'
 import './response.css'
 import './focus.css'
+import './detail.css'
 import App from './App'
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>)

@@ -123,7 +123,8 @@ const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`); const path = url.pathname.split('/').filter(Boolean)
     if (req.method === 'GET' && path.join('/') === 'api/sessions') { json(res); return res.end(JSON.stringify(await listSessions())) }
-    if (req.method === 'GET' && path[0] === 'api' && path[1] === 'sessions' && path[2]) { json(res); return res.end(JSON.stringify(await readManifest(path[2]))) }
+    if (req.method === 'GET' && path[0] === 'api' && path[1] === 'sessions' && path[2] && path.length === 3) { json(res); return res.end(JSON.stringify(await readManifest(path[2]))) }
+    if (req.method === 'GET' && path[0] === 'api' && path[1] === 'sessions' && path[2] && path[3] === 'nodes' && path[4]) { json(res); return res.end(JSON.stringify(await readNode(path[2], path[4]))) }
     if (req.method === 'POST' && path.join('/') === 'api/sessions') { const data = await body(req); json(res, 201); return res.end(JSON.stringify(await createSession(data.question))) }
     const id = path[2]; const data = req.method === 'POST' ? await body(req) : {}
     if (req.method === 'POST' && path[3] === 'branches' && path[5] === 'generate') { const manifest = await readManifest(id); const parent = find(manifest, path[4]); await preparePending(id, manifest, parent, 'difficulty', 2, data.count === 1 ? 1 : 3); await writeManifest(id, manifest); void generate(id, path[4], 'difficulty', data.count === 1 ? 1 : 3); json(res, 202); return res.end('{}') }
