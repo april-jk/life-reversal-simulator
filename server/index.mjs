@@ -1,5 +1,5 @@
 import { createServer } from 'node:http'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod'
 
@@ -53,6 +53,17 @@ async function retireDescendants(id, manifest, node) {
     await retireDescendants(id, manifest, child)
   }
 }
+async function preparePending(id, manifest, parent, type, depth, count) {
+  for (let index = 0; index < count; index += 1) await createNode(id, manifest, parent, { type, depth, status: 'pending', title: '推演中…' })
+}
+async function listSessions() {
+  await mkdir(sessionsDir, { recursive: true })
+  const entries = await readdir(sessionsDir, { withFileTypes: true })
+  const sessions = await Promise.all(entries.filter((entry) => entry.isDirectory()).map(async (entry) => {
+    try { const manifest = await readManifest(entry.name); const root = find(manifest, manifest.root.node_id); return { session_id: manifest.session_id, created_at: manifest.created_at, title: root.title, node_count: manifest.nodes.length, pending_count: manifest.nodes.filter((node) => node.status === 'pending').length } } catch { return null }
+  }))
+  return sessions.filter(Boolean).sort((a, b) => b.created_at.localeCompare(a.created_at))
+}
 
 function extractJson(content) { const match = content.match(/\{[\s\S]*\}/); if (!match) throw new Error('Model did not return JSON'); return JSON.parse(match[0]) }
 async function ask(instruction, schema) {
@@ -98,20 +109,21 @@ async function generate(id, parentId, kind, count = 3, responseText = '') {
 async function createSession(question) {
   const id = `life-session-${dateStamp()}-${Math.random().toString(36).slice(2, 6)}`; const anchor = stamp().slice(0, 10); const manifest = { session_id: id, created_at: stamp(), root: { node_id: 'n001', time_anchor: anchor, age_anchor: ageFrom(question) }, nodes: [], reverse_history: [] }
   await mkdir(join(sessionPath(id), 'nodes'), { recursive: true }); const root = await createNode(id, manifest, null, { type: 'decision', depth: 0, title: question, content: { question, user_age: manifest.root.age_anchor }, brief: question.slice(0, 30) }); manifest.root.node_id = root.id
-  for (let index = 0; index < 3; index += 1) await createNode(id, manifest, root, { type: 'branch', depth: 1, status: 'pending', title: '推演中…' })
+  await preparePending(id, manifest, root, 'branch', 1, 3)
   await writeManifest(id, manifest); void generate(id, root.id, 'branch'); return manifest
 }
 async function body(req) { let raw = ''; for await (const chunk of req) raw += chunk; return raw ? JSON.parse(raw) : {} }
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`); const path = url.pathname.split('/').filter(Boolean)
+    if (req.method === 'GET' && path.join('/') === 'api/sessions') { json(res); return res.end(JSON.stringify(await listSessions())) }
     if (req.method === 'GET' && path[0] === 'api' && path[1] === 'sessions' && path[2]) { json(res); return res.end(JSON.stringify(await readManifest(path[2]))) }
     if (req.method === 'POST' && path.join('/') === 'api/sessions') { const data = await body(req); json(res, 201); return res.end(JSON.stringify(await createSession(data.question))) }
     const id = path[2]; const data = req.method === 'POST' ? await body(req) : {}
-    if (req.method === 'POST' && path[3] === 'branches' && path[5] === 'generate') { void generate(id, path[4], 'difficulty', data.count === 1 ? 1 : 3); json(res, 202); return res.end('{}') }
+    if (req.method === 'POST' && path[3] === 'branches' && path[5] === 'generate') { const manifest = await readManifest(id); const parent = find(manifest, path[4]); await preparePending(id, manifest, parent, 'difficulty', 2, data.count === 1 ? 1 : 3); await writeManifest(id, manifest); void generate(id, path[4], 'difficulty', data.count === 1 ? 1 : 3); json(res, 202); return res.end('{}') }
     if (req.method === 'POST' && path[3] === 'branches' && path[5] === 'manual-difficulty') { const manifest = await readManifest(id); const parent = find(manifest, path[4]); const offset = `+${offsetMonths((await readNode(id, parent.id)).content.time_offset) + 3}个月`; await createNode(id, manifest, parent, { type: 'difficulty', depth: 2, title: data.title, source: 'user', content: { description: data.description || data.title, cause: '用户主动识别的风险', frequency: 'medium', impact: 'medium', time_offset: offset, time_label: labelFor(manifest.root.time_anchor, offset) } }); await writeManifest(id, manifest); json(res, 201); return res.end('{}') }
-    if (req.method === 'POST' && path[3] === 'difficulties' && path[5] === 'response') { const manifest = await readManifest(id); const difficulty = find(manifest, path[4]); const response = await createNode(id, manifest, difficulty, { type: 'response', depth: 2, title: '我的应对', source: 'user', content: { text: data.text } }); await writeManifest(id, manifest); void generate(id, response.id, 'situation', 3, data.text); json(res, 202); return res.end('{}') }
-    if (req.method === 'POST' && path[3] === 'situations' && path[5] === 'activate') { void generate(id, path[4], 'outcome'); json(res, 202); return res.end('{}') }
+    if (req.method === 'POST' && path[3] === 'difficulties' && path[5] === 'response') { const manifest = await readManifest(id); const difficulty = find(manifest, path[4]); const response = await createNode(id, manifest, difficulty, { type: 'response', depth: 2, title: '我的应对', source: 'user', content: { text: data.text } }); await preparePending(id, manifest, response, 'situation', 3, 3); await writeManifest(id, manifest); void generate(id, response.id, 'situation', 3, data.text); json(res, 202); return res.end('{}') }
+    if (req.method === 'POST' && path[3] === 'situations' && path[5] === 'activate') { const manifest = await readManifest(id); const situation = find(manifest, path[4]); await preparePending(id, manifest, situation, 'outcome', 4, 1); await writeManifest(id, manifest); void generate(id, path[4], 'outcome'); json(res, 202); return res.end('{}') }
     if (req.method === 'POST' && path[3] === 'nodes' && path[5] === 'reverse') { const manifest = await readManifest(id); const node = find(manifest, path[4]); await retireDescendants(id, manifest, node); manifest.reverse_history.push({ at_node: node.id, reversed_at: stamp(), retired_subtree_root: node.children[0] || null, new_chain_from: node.id }); await writeManifest(id, manifest); json(res); return res.end('{}') }
     json(res, 404); res.end(JSON.stringify({ error: 'Not found' }))
   } catch (error) { json(res, 500); res.end(JSON.stringify({ error: error.message })) }
