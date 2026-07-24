@@ -8,6 +8,7 @@ import './response.css'
 import './focus.css'
 import './detail.css'
 import './detail-layout.css'
+import './workspace.css'
 import App from './App'
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>)
