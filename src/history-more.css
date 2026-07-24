@@ -1,0 +1,1 @@
+.app-shell:not(.has-session)>aside .history-head{cursor:pointer}.app-shell:not(.has-session)>aside .history-list{max-height:168px}body.show-all-history .app-shell:not(.has-session)>aside .history-head::before{content:'Less'}body.show-all-history .app-shell:not(.has-session)>aside .history-list{max-height:310px}
