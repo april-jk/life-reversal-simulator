@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Background, Controls, Handle, Position, ReactFlow, type Node, type NodeProps, type ReactFlowInstance } from '@xyflow/react'
-import { ArrowLeft, Bot, ChevronRight, CornerUpLeft, Download, FilePlus, Focus, History, LoaderCircle, Menu, Plus, Save, Send, Sparkles, Undo2, X } from 'lucide-react'
+import { ArrowLeft, Bot, ChevronRight, CornerUpLeft, Download, FilePlus, Focus, History, Info, LoaderCircle, Menu, Plus, Save, Send, Sparkles, Undo2, X } from 'lucide-react'
 
 type TreeNode = { id: string; parent: string | null; type: string; depth: number; status: string; title: string; detail?: string; time_label?: string; children: string[]; file: string }
 type Manifest = { session_id: string; root: { node_id: string; time_anchor: string; age_anchor?: number | null }; nodes: TreeNode[]; reverse_history: unknown[] }
@@ -16,9 +16,9 @@ function monthLabel(node: TreeNode, anchor: string) { return node.time_label || 
 function SimulatorNode({ data }: NodeProps<LifeNode>) {
   const { item } = data; const [manual, setManual] = useState(false); const [value, setValue] = useState(''); const [absolute, setAbsolute] = useState(false)
   const submit = (action: () => void) => { action(); setValue(''); setManual(false) }
-  return <div className={`life-node ${item.type} ${item.status}`} onClick={() => data.onInspect(item.id)}>
+  return <div className={`life-node ${item.type} ${item.status}`} onMouseDownCapture={() => data.onInspect(item.id)} onPointerDown={() => data.onInspect(item.id)} onClick={() => data.onInspect(item.id)}>
     <Handle type="target" position={Position.Left} />
-    <div className="node-top"><span className="node-kind"><i className="node-order">{Number(item.id.slice(1))}</i>{item.type}</span>{item.time_label && <button className="time" onClick={() => setAbsolute(!absolute)}>{absolute ? item.time_label : '几个月后'}</button>}</div>
+    <div className="node-top"><span className="node-kind"><i className="node-order">{Number(item.id.slice(1))}</i>{item.type}</span><span className="node-top-actions">{item.time_label && <button className="time" onClick={(event) => { event.stopPropagation(); setAbsolute(!absolute) }}>{absolute ? item.time_label : '几个月后'}</button>}<button className="inspect-node" title="查看详情" aria-label="查看详情" onPointerDown={(event) => event.stopPropagation()} onClick={(event) => { event.stopPropagation(); data.onInspect(item.id) }}><Info size={13} /></button></span></div>
     <strong>{item.status === 'pending' ? <span className="generating"><LoaderCircle size={15} />正在推演</span> : item.status === 'error' ? '推演失败，点击重试' : item.title}</strong>
     {item.type === 'response' && item.detail && <p className="response-text">{item.detail}</p>}
     {item.type === 'difficulty' && <span className="tagline">概率 / 影响将在推演中标记</span>}
@@ -35,7 +35,7 @@ function SimulatorNode({ data }: NodeProps<LifeNode>) {
 function DetailPanel({ detail, onEnter, onClose }: { detail: NodeDetail | null; onEnter: () => void; onClose: () => void }) {
   if (!detail) return null
   const labels: Record<string, string> = { description: '事件描述', cause: '因果链', frequency: '发生概率', impact: '影响程度', text: '我的应对', summary: '路径说明', trend: '局面走向', time_label: '时间' }
-  return <aside className="detail-panel"><div className="detail-top"><span>{detail.type}</span><button onClick={onClose} title="关闭详情"><X size={17} /></button></div><div className="detail-step">第 {Number(detail.id.slice(1))} 步</div><h2>{detail.title}</h2><div className="detail-content">{Object.entries(detail.content).filter(([, value]) => value).map(([key, value]) => <div key={key}><small>{labels[key] || key}</small><p>{value}</p></div>)}</div><button className="enter-step" onClick={onEnter}><Focus size={16} />进入这一步</button></aside>
+  return <aside className="detail-panel"><div className="detail-top"><span>{detail.type}</span><button onClick={onClose} title="关闭详情"><X size={17} /></button></div><div className="detail-step">第 {Number(detail.id.slice(1))} 步</div><h2>{detail.title}</h2><div className="detail-content">{Object.entries(detail.content || {}).filter(([, value]) => value).map(([key, value]) => <div key={key}><small>{labels[key] || key}</small><p>{value}</p></div>)}{Object.keys(detail.content || {}).length === 0 && <p className="detail-loading">正在读取这个节点的详细信息…</p>}</div><button className="enter-step" onClick={onEnter}><Focus size={16} />进入这一步</button></aside>
 }
 
 function CanvasMenu({ manifest, onNew, onReturn }: { manifest: Manifest | null; onNew: () => void; onReturn: () => void }) {
@@ -54,7 +54,7 @@ export default function App() {
   useEffect(() => { if (!manifest) return; const pending = manifest.nodes.some((node) => node.status === 'pending'); if (!pending) return; const timer = window.setInterval(() => refresh(manifest.session_id), 1000); return () => window.clearInterval(timer) }, [manifest, refresh])
   const create = async (value = question) => { if (!value.trim()) return; setLoading(true); setError(''); try { const next = await request('/sessions', 'POST', { question: value }); setManifest(next); updateSessionUrl(next.session_id, false); void loadHistory(); setQuestion('') } catch (e) { setError(e instanceof Error ? e.message : '创建失败') } finally { setLoading(false) } }
   const mutate = async (path: string, data?: unknown) => { if (!manifest) return; try { await request(path, 'POST', data); await refresh(manifest.session_id) } catch (e) { setError(e instanceof Error ? e.message : '操作失败') } }
-  const selectNode = async (nodeId: string) => { if (!manifest) return; try { setSelectedDetail(await request(`/sessions/${manifest.session_id}/nodes/${nodeId}`)) } catch (e) { setError(e instanceof Error ? e.message : '无法读取节点详情') } }
+  const selectNode = async (nodeId: string) => { if (!manifest) return; const summary = manifest.nodes.find((node) => node.id === nodeId); if (summary) setSelectedDetail({ id: summary.id, type: summary.type, title: summary.title, status: summary.status, content: {} }); try { setSelectedDetail(await request(`/sessions/${manifest.session_id}/nodes/${nodeId}`)) } catch (e) { setError(e instanceof Error ? e.message : '无法读取节点详情') } }
   const nodes = useMemo(() => {
     if (!manifest) return []; const lookup = new Map(manifest.nodes.map((node) => [node.id, node])); const childIds = (node: TreeNode) => [...node.children].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1))); const auto = new Map<string, { x: number; y: number }>(); let leaf = 0
     const place = (id: string, column: number): number => { const item = lookup.get(id)!; const children = childIds(item); const childYs = children.map((child) => place(child, column + 1)); const y = childYs.length ? childYs.reduce((sum, value) => sum + value, 0) / childYs.length : leaf++ * 220; auto.set(id, { x: column * 330, y }); return y }

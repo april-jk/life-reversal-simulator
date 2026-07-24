@@ -15,6 +15,8 @@ import './start-grid.css'
 import './start-compact.css'
 import './history-more.css'
 import './start-action.css'
+import './inspect.css'
+import './detail-visibility.css'
 import App from './App'
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>)
