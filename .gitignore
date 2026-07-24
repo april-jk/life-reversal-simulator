@@ -1,1 +1,5 @@
 .omx/
+.env.local
+life-sessions/
+dist/
+node_modules/
