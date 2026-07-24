@@ -4,7 +4,7 @@ import { ArrowLeft, Bot, ChevronRight, CornerUpLeft, Download, FilePlus, Focus, 
 
 type TreeNode = { id: string; parent: string | null; type: string; depth: number; status: string; title: string; detail?: string; time_label?: string; children: string[]; file: string }
 type Manifest = { session_id: string; root: { node_id: string; time_anchor: string; age_anchor?: number | null }; nodes: TreeNode[]; reverse_history: unknown[] }
-type LifeData = { item: TreeNode; anchor: string; onGenerate: (id: string, one?: boolean) => void; onManual: (id: string, title: string) => void; onRespond: (id: string, text: string) => void; onOutcome: (id: string) => void; onReverse: (id: string) => void }
+type LifeData = { item: TreeNode; anchor: string; onInspect: (id: string) => void; onGenerate: (id: string, one?: boolean) => void; onManual: (id: string, title: string) => void; onRespond: (id: string, text: string) => void; onOutcome: (id: string) => void; onReverse: (id: string) => void }
 type LifeNode = Node<LifeData, 'life'>
 type SessionSummary = { session_id: string; created_at: string; title: string; node_count: number; pending_count: number }
 type NodeDetail = { id: string; type: string; title: string; status: string; content: Record<string, string> }
@@ -16,7 +16,7 @@ function monthLabel(node: TreeNode, anchor: string) { return node.time_label || 
 function SimulatorNode({ data }: NodeProps<LifeNode>) {
   const { item } = data; const [manual, setManual] = useState(false); const [value, setValue] = useState(''); const [absolute, setAbsolute] = useState(false)
   const submit = (action: () => void) => { action(); setValue(''); setManual(false) }
-  return <div className={`life-node ${item.type} ${item.status}`}>
+  return <div className={`life-node ${item.type} ${item.status}`} onClick={() => data.onInspect(item.id)}>
     <Handle type="target" position={Position.Left} />
     <div className="node-top"><span className="node-kind"><i className="node-order">{Number(item.id.slice(1))}</i>{item.type}</span>{item.time_label && <button className="time" onClick={() => setAbsolute(!absolute)}>{absolute ? item.time_label : '几个月后'}</button>}</div>
     <strong>{item.status === 'pending' ? <span className="generating"><LoaderCircle size={15} />正在推演</span> : item.status === 'error' ? '推演失败，点击重试' : item.title}</strong>
@@ -60,7 +60,7 @@ export default function App() {
     const place = (id: string, column: number): number => { const item = lookup.get(id)!; const children = childIds(item); const childYs = children.map((child) => place(child, column + 1)); const y = childYs.length ? childYs.reduce((sum, value) => sum + value, 0) / childYs.length : leaf++ * 220; auto.set(id, { x: column * 330, y }); return y }
     const subtreeRoot = focusedId || manifest.root.node_id; place(subtreeRoot, 0)
     const visible = new Set<string>(); const addDescendants = (id: string) => { visible.add(id); childIds(lookup.get(id)!).forEach(addDescendants) }; addDescendants(subtreeRoot)
-    return manifest.nodes.filter((item) => visible.has(item.id)).map((item) => ({ id: item.id, type: 'life', position: positions[item.id] || auto.get(item.id)!, className: 'tree-node-current', data: { item, anchor: manifest.root.time_anchor, onGenerate: (nodeId: string, one = false) => mutate(`/sessions/${manifest.session_id}/branches/${nodeId}/generate`, { count: one ? 1 : 3 }), onManual: (nodeId: string, title: string) => mutate(`/sessions/${manifest.session_id}/branches/${nodeId}/manual-difficulty`, { title }), onRespond: (nodeId: string, text: string) => mutate(`/sessions/${manifest.session_id}/difficulties/${nodeId}/response`, { text }), onOutcome: (nodeId: string) => mutate(`/sessions/${manifest.session_id}/situations/${nodeId}/activate`), onReverse: (nodeId: string) => mutate(`/sessions/${manifest.session_id}/nodes/${nodeId}/reverse`) } }))
+    return manifest.nodes.filter((item) => visible.has(item.id)).map((item) => ({ id: item.id, type: 'life', position: positions[item.id] || auto.get(item.id)!, className: 'tree-node-current', data: { item, anchor: manifest.root.time_anchor, onInspect: selectNode, onGenerate: (nodeId: string, one = false) => mutate(`/sessions/${manifest.session_id}/branches/${nodeId}/generate`, { count: one ? 1 : 3 }), onManual: (nodeId: string, title: string) => mutate(`/sessions/${manifest.session_id}/branches/${nodeId}/manual-difficulty`, { title }), onRespond: (nodeId: string, text: string) => mutate(`/sessions/${manifest.session_id}/difficulties/${nodeId}/response`, { text }), onOutcome: (nodeId: string) => mutate(`/sessions/${manifest.session_id}/situations/${nodeId}/activate`), onReverse: (nodeId: string) => mutate(`/sessions/${manifest.session_id}/nodes/${nodeId}/reverse`) } }))
   }, [manifest, focusedId, positions])
   const edges = useMemo(() => { const visibleIds = new Set(nodes.map((node) => node.id)); return manifest?.nodes.filter((node) => node.parent && visibleIds.has(node.parent) && visibleIds.has(node.id)).map((node) => ({ id: `${node.parent}-${node.id}`, source: node.parent!, target: node.id, animated: node.status === 'pending', className: node.status === 'reversed' ? 'retired-edge' : '' })) || [] }, [manifest, nodes])
   const pendingCount = manifest?.nodes.filter((node) => node.status === 'pending').length || 0
