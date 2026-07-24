@@ -27,7 +27,13 @@ function ageFrom(question) { return Number(question.match(/(?:我现在|今年|�
 function sessionPath(id) { return join(sessionsDir, id) }
 function manifestPath(id) { return join(sessionPath(id), 'manifest.json') }
 function nodePath(id, nodeId) { return join(sessionPath(id), 'nodes', `${nodeId}.json`) }
-async function readManifest(id) { return JSON.parse(await readFile(manifestPath(id), 'utf8')) }
+async function readManifest(id) {
+  const manifest = JSON.parse(await readFile(manifestPath(id), 'utf8'))
+  await Promise.all(manifest.nodes.filter((node) => node.type === 'response' && !node.detail).map(async (node) => {
+    try { node.detail = (await readNode(id, node.id)).content.text } catch { /* Keep the index readable if an old node file is missing. */ }
+  }))
+  return manifest
+}
 async function writeManifest(id, manifest) { await writeFile(manifestPath(id), JSON.stringify(manifest, null, 2)) }
 async function readNode(id, nodeId) { return JSON.parse(await readFile(nodePath(id, nodeId), 'utf8')) }
 async function writeNode(id, node) { await writeFile(nodePath(id, node.id), JSON.stringify(node, null, 2)) }
@@ -38,7 +44,7 @@ async function createNode(id, manifest, parent, data) {
   const nodeId = nextId(manifest)
   const parentFile = parent ? await readNode(id, parent.id) : null
   const pathSummary = parentFile ? [...parentFile.path_summary, { node: nodeId, type: data.type, brief: data.brief || data.title.slice(0, 30) }] : [{ node: nodeId, type: data.type, brief: data.brief || data.title.slice(0, 30) }]
-  const record = { id: nodeId, parent: parent?.id || null, type: data.type, depth: data.depth, status: data.status || 'active', title: data.title, time_label: data.time_label, children: [], file: `nodes/${nodeId}.json` }
+  const record = { id: nodeId, parent: parent?.id || null, type: data.type, depth: data.depth, status: data.status || 'active', title: data.title, detail: data.detail, time_label: data.time_label, children: [], file: `nodes/${nodeId}.json` }
   const file = { id: nodeId, type: data.type, depth: data.depth, status: record.status, source: data.source, title: data.title, content: data.content || {}, path_summary: pathSummary, children: [], agent_meta: data.agentMeta }
   manifest.nodes.push(record)
   if (parent) { parent.children.push(nodeId); parentFile.children.push(nodeId); await writeNode(id, parentFile) }
@@ -122,7 +128,7 @@ const server = createServer(async (req, res) => {
     const id = path[2]; const data = req.method === 'POST' ? await body(req) : {}
     if (req.method === 'POST' && path[3] === 'branches' && path[5] === 'generate') { const manifest = await readManifest(id); const parent = find(manifest, path[4]); await preparePending(id, manifest, parent, 'difficulty', 2, data.count === 1 ? 1 : 3); await writeManifest(id, manifest); void generate(id, path[4], 'difficulty', data.count === 1 ? 1 : 3); json(res, 202); return res.end('{}') }
     if (req.method === 'POST' && path[3] === 'branches' && path[5] === 'manual-difficulty') { const manifest = await readManifest(id); const parent = find(manifest, path[4]); const offset = `+${offsetMonths((await readNode(id, parent.id)).content.time_offset) + 3}个月`; await createNode(id, manifest, parent, { type: 'difficulty', depth: 2, title: data.title, source: 'user', content: { description: data.description || data.title, cause: '用户主动识别的风险', frequency: 'medium', impact: 'medium', time_offset: offset, time_label: labelFor(manifest.root.time_anchor, offset) } }); await writeManifest(id, manifest); json(res, 201); return res.end('{}') }
-    if (req.method === 'POST' && path[3] === 'difficulties' && path[5] === 'response') { const manifest = await readManifest(id); const difficulty = find(manifest, path[4]); const response = await createNode(id, manifest, difficulty, { type: 'response', depth: 2, title: '我的应对', source: 'user', content: { text: data.text } }); await preparePending(id, manifest, response, 'situation', 3, 3); await writeManifest(id, manifest); void generate(id, response.id, 'situation', 3, data.text); json(res, 202); return res.end('{}') }
+    if (req.method === 'POST' && path[3] === 'difficulties' && path[5] === 'response') { const manifest = await readManifest(id); const difficulty = find(manifest, path[4]); const response = await createNode(id, manifest, difficulty, { type: 'response', depth: 2, title: '我的应对', detail: data.text, source: 'user', content: { text: data.text } }); await preparePending(id, manifest, response, 'situation', 3, 3); await writeManifest(id, manifest); void generate(id, response.id, 'situation', 3, data.text); json(res, 202); return res.end('{}') }
     if (req.method === 'POST' && path[3] === 'situations' && path[5] === 'activate') { const manifest = await readManifest(id); const situation = find(manifest, path[4]); await preparePending(id, manifest, situation, 'outcome', 4, 1); await writeManifest(id, manifest); void generate(id, path[4], 'outcome'); json(res, 202); return res.end('{}') }
     if (req.method === 'POST' && path[3] === 'nodes' && path[5] === 'reverse') { const manifest = await readManifest(id); const node = find(manifest, path[4]); await retireDescendants(id, manifest, node); manifest.reverse_history.push({ at_node: node.id, reversed_at: stamp(), retired_subtree_root: node.children[0] || null, new_chain_from: node.id }); await writeManifest(id, manifest); json(res); return res.end('{}') }
     json(res, 404); res.end(JSON.stringify({ error: 'Not found' }))

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Background, Controls, Handle, Position, ReactFlow, type Node, type NodeProps } from '@xyflow/react'
 import { Bot, CornerUpLeft, Focus, History, LoaderCircle, Plus, Send, Sparkles, X } from 'lucide-react'
 
-type TreeNode = { id: string; parent: string | null; type: string; depth: number; status: string; title: string; time_label?: string; children: string[]; file: string }
+type TreeNode = { id: string; parent: string | null; type: string; depth: number; status: string; title: string; detail?: string; time_label?: string; children: string[]; file: string }
 type Manifest = { session_id: string; root: { node_id: string; time_anchor: string; age_anchor?: number | null }; nodes: TreeNode[]; reverse_history: unknown[] }
 type LifeData = { item: TreeNode; anchor: string; onGenerate: (id: string, one?: boolean) => void; onManual: (id: string, title: string) => void; onRespond: (id: string, text: string) => void; onOutcome: (id: string) => void; onReverse: (id: string) => void }
 type LifeNode = Node<LifeData, 'life'>
@@ -19,6 +19,7 @@ function SimulatorNode({ data }: NodeProps<LifeNode>) {
     <Handle type="target" position={Position.Left} />
     <div className="node-top"><span className="node-kind"><i className="node-order">{Number(item.id.slice(1))}</i>{item.type}</span>{item.time_label && <button className="time" onClick={() => setAbsolute(!absolute)}>{absolute ? item.time_label : '几个月后'}</button>}</div>
     <strong>{item.status === 'pending' ? <span className="generating"><LoaderCircle size={15} />正在推演</span> : item.status === 'error' ? '推演失败，点击重试' : item.title}</strong>
+    {item.type === 'response' && item.detail && <p className="response-text">{item.detail}</p>}
     {item.type === 'difficulty' && <span className="tagline">概率 / 影响将在推演中标记</span>}
     {item.type === 'difficulty' && item.status === 'active' && <div className="node-input"><input value={value} onChange={(e) => setValue(e.target.value)} placeholder="你会怎么处理？" onKeyDown={(e) => e.key === 'Enter' && value.trim() && submit(() => data.onRespond(item.id, value))} /><button onClick={() => value.trim() && submit(() => data.onRespond(item.id, value))}><Send size={14} /></button></div>}
     {item.type === 'situation' && item.status === 'active' && <button className="inline-action" onClick={() => data.onOutcome(item.id)}>查看阶段结局</button>}

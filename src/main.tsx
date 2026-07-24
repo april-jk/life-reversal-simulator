@@ -4,6 +4,7 @@ import '@xyflow/react/dist/style.css'
 import './styles.css'
 import './motion.css'
 import './canvas.css'
+import './response.css'
 import App from './App'
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>)
