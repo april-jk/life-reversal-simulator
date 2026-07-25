@@ -19,6 +19,7 @@ import './inspect.css'
 import './detail-visibility.css'
 import './focus-layout.css'
 import './sibling-actions.css'
+import './sibling-interaction.css'
 import App from './App'
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>)
