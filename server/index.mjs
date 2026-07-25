@@ -89,7 +89,7 @@ function prompt(kind, path, extra = '') {
   const common = `合法上下文仅为：${context}。不得提及或推断任何其他分支。所有 time_offset 必须是相对根节点、格式 +N个月，且严格大于当前节点的时间偏移。${extra}`
   if (kind === 'branch') return `基于用户抉择生成 2 到 3 个可执行选择分支。${common}\n返回 {"branches":[{"title":"","summary":"","time_offset":"+N个月"}]}`
   if (kind === 'difficulty') return `为这条路径生成 ${extra || '3'} 个高频且具体、可应对的困难。至少 2 个 frequency=high，最多 1 个 medium；禁止极端事件。cause 必须是明确因果链。${common}\n返回 {"difficulties":[{"title":"","description":"","cause":"","frequency":"high","impact":"medium","time_offset":"+N个月"}]}`
-  if (kind === 'situation') return `根据用户应对推演 3 个后续局面，平衡呈现 better/worse/neutral 走向。${common}\n返回 {"situations":[{"title":"","description":"","trend":"neutral","time_offset":"+N个月"}]}`
+  if (kind === 'situation') return `根据用户应对推演指定数量的后续局面，平衡呈现 better/worse/neutral 走向。${common}\n返回 {"situations":[{"title":"","description":"","trend":"neutral","time_offset":"+N个月"}]}`
   return `为该局面写一段 80 到 140 字的阶段性结语，客观、有行动感、不宿命化。${common}\n返回 {"outcome":{"summary":""}}`
 }
 async function generate(id, parentId, kind, count = 3, responseText = '') {
@@ -98,7 +98,7 @@ async function generate(id, parentId, kind, count = 3, responseText = '') {
     let result
     if (kind === 'branch') result = await ask(prompt('branch', parentFile.path_summary), branchSchema)
     if (kind === 'difficulty') result = await ask(prompt('difficulty', parentFile.path_summary, count === 1 ? '1' : '3'), difficultySchema)
-    if (kind === 'situation') result = await ask(prompt('situation', parentFile.path_summary, `用户的应对是：${responseText}`), situationSchema)
+    if (kind === 'situation') result = await ask(prompt('situation', parentFile.path_summary, `用户的应对是：${responseText}。只生成 ${count} 个局面。`), situationSchema)
     if (kind === 'outcome') result = await ask(prompt('outcome', parentFile.path_summary), outcomeSchema)
     const items = kind === 'branch' ? result.branches : kind === 'difficulty' ? result.difficulties : kind === 'situation' ? result.situations : [result.outcome]
     // Other generation calls may have completed while this model request was in flight.
@@ -133,6 +133,7 @@ const server = createServer(async (req, res) => {
     if (req.method === 'POST' && path[3] === 'branches' && path[5] === 'generate') { const manifest = await readManifest(id); const parent = find(manifest, path[4]); await preparePending(id, manifest, parent, 'difficulty', 2, data.count === 1 ? 1 : 3); await writeManifest(id, manifest); void generate(id, path[4], 'difficulty', data.count === 1 ? 1 : 3); json(res, 202); return res.end('{}') }
     if (req.method === 'POST' && path[3] === 'branches' && path[5] === 'manual-difficulty') { const manifest = await readManifest(id); const parent = find(manifest, path[4]); const offset = `+${offsetMonths((await readNode(id, parent.id)).content.time_offset) + 3}个月`; await createNode(id, manifest, parent, { type: 'difficulty', depth: 2, title: data.title, source: 'user', content: { description: data.description || data.title, cause: '用户主动识别的风险', frequency: 'medium', impact: 'medium', time_offset: offset, time_label: labelFor(manifest.root.time_anchor, offset) } }); await writeManifest(id, manifest); json(res, 201); return res.end('{}') }
     if (req.method === 'POST' && path[3] === 'difficulties' && path[5] === 'response') { const manifest = await readManifest(id); const difficulty = find(manifest, path[4]); const response = await createNode(id, manifest, difficulty, { type: 'response', depth: 2, title: '我的应对', detail: data.text, source: 'user', content: { text: data.text } }); await preparePending(id, manifest, response, 'situation', 3, 3); await writeManifest(id, manifest); void generate(id, response.id, 'situation', 3, data.text); json(res, 202); return res.end('{}') }
+    if (req.method === 'POST' && path[3] === 'responses' && path[5] === 'generate-situation') { const manifest = await readManifest(id); const response = find(manifest, path[4]); const responseFile = await readNode(id, response.id); await preparePending(id, manifest, response, 'situation', 3, 1); await writeManifest(id, manifest); void generate(id, response.id, 'situation', 1, responseFile.content.text); json(res, 202); return res.end('{}') }
     if (req.method === 'POST' && path[3] === 'situations' && path[5] === 'activate') { const manifest = await readManifest(id); const situation = find(manifest, path[4]); await preparePending(id, manifest, situation, 'outcome', 4, 1); await writeManifest(id, manifest); void generate(id, path[4], 'outcome'); json(res, 202); return res.end('{}') }
     if (req.method === 'POST' && path[3] === 'nodes' && path[5] === 'reverse') { const manifest = await readManifest(id); const node = find(manifest, path[4]); await retireDescendants(id, manifest, node); manifest.reverse_history.push({ at_node: node.id, reversed_at: stamp(), retired_subtree_root: node.children[0] || null, new_chain_from: node.id }); await writeManifest(id, manifest); json(res); return res.end('{}') }
     json(res, 404); res.end(JSON.stringify({ error: 'Not found' }))

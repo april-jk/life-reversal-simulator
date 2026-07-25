@@ -18,6 +18,7 @@ import './start-action.css'
 import './inspect.css'
 import './detail-visibility.css'
 import './focus-layout.css'
+import './sibling-actions.css'
 import App from './App'
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>)
