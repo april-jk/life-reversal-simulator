@@ -1,1 +1,1 @@
-.react-flow__node:has(.life-node:hover),.react-flow__node:has(.node-hover-actions:hover),.react-flow__node:has(.node-manual-popover){z-index:1000!important}.node-hover-actions{z-index:1001}.node-manual-popover{z-index:1002}
+.react-flow__node:has(.life-node:hover),.react-flow__node:has(.node-hover-actions),.react-flow__node:has(.node-manual-popover){z-index:1000!important}.node-add-controls{z-index:1001}.node-hover-actions{z-index:1002}.node-manual-popover{z-index:1003}
