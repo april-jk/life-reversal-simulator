@@ -22,6 +22,7 @@ import './sibling-actions.css'
 import './sibling-interaction.css'
 import './sibling-hitbox.css'
 import './sibling-layer.css'
+import './reverse-recovery.css'
 import App from './App'
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>)
