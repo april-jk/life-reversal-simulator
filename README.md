@@ -19,7 +19,7 @@ npm install
 cp .env.example .env.local
 ```
 
-在 `.env.local` 中设置 `ZHIPU_API_KEY`，然后分别启动 API 服务和前端：
+在 `.env.local` 中设置 `DEEPSEEK_API_KEY`，然后分别启动 API 服务和前端：
 
 ```bash
 npm run server

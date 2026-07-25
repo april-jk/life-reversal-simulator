@@ -6,8 +6,8 @@ import { z } from 'zod'
 const port = Number(process.env.PORT || process.env.SERVER_PORT || 8787)
 const sessionsDir = process.env.SESSIONS_DIR || join(process.cwd(), 'life-sessions')
 const distDir = join(process.cwd(), 'dist')
-const apiKey = process.env.ZHIPU_API_KEY
-const model = process.env.ZHIPU_MODEL || 'glm-5'
+const apiKey = process.env.DEEPSEEK_API_KEY
+const model = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash'
 const json = (response, status = 200) => response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
 const assetTypes = { '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.ico': 'image/x-icon', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.map': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' }
 const stamp = () => new Date().toISOString()
@@ -81,12 +81,12 @@ async function listSessions() {
 
 function extractJson(content) { const match = content.match(/\{[\s\S]*\}/); if (!match) throw new Error('Model did not return JSON'); return JSON.parse(match[0]) }
 async function ask(instruction, schema) {
-  if (!apiKey) throw new Error('ZHIPU_API_KEY is not configured on the server')
+  if (!apiKey) throw new Error('DEEPSEEK_API_KEY is not configured on the server')
   let lastError
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const response = await fetch('https://open.bigmodel.cn/api/paas/v4/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model, messages: [{ role: 'system', content: '你是审慎的人生决策推演助手。只返回合法 JSON，不要 Markdown。' }, { role: 'user', content: instruction }], thinking: { type: 'enabled' }, temperature: 0.7, max_tokens: 4000 }) })
-      if (!response.ok) throw new Error(`GLM request failed: ${response.status}`)
+      const response = await fetch('https://api.deepseek.com/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json', Authorization: `Bearer ${apiKey}` }, body: JSON.stringify({ model, messages: [{ role: 'system', content: '你是审慎的人生决策推演助手。只返回合法 JSON，不要 Markdown。' }, { role: 'user', content: instruction }], thinking: { type: 'enabled' }, reasoning_effort: 'high', temperature: 0.7, max_tokens: 4000, response_format: { type: 'text' }, stream: false }) })
+      if (!response.ok) throw new Error(`DeepSeek request failed: ${response.status}`)
       return schema.parse(extractJson((await response.json()).choices?.[0]?.message?.content || ''))
     } catch (error) { lastError = error }
   }
