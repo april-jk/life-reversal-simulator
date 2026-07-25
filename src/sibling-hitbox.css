@@ -1,0 +1,1 @@
+.hover-add{bottom:-46px;padding-top:20px;pointer-events:auto}.hover-add::before{top:0;height:24px}.hover-add button{touch-action:manipulation}.hover-add.expanded{bottom:-83px}.life-node:has(.hover-add:hover) .hover-add{pointer-events:auto}
