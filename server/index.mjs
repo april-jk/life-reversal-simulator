@@ -40,6 +40,8 @@ async function writeProfiles(profiles) { await mkdir(sessionsDir, { recursive: t
 async function profileFor(profileId) { return profileId ? (await readProfiles()).find((profile) => profile.id === profileId) || null : null }
 async function readManifest(id) {
   const manifest = JSON.parse(await readFile(manifestPath(id), 'utf8'))
+  const profile = await profileFor(manifest.profile_id)
+  if (profile) find(manifest, manifest.root.node_id).profile = profile
   await Promise.all(manifest.nodes.filter((node) => node.type === 'response' && !node.detail).map(async (node) => {
     try { node.detail = (await readNode(id, node.id)).content.text } catch { /* Keep the index readable if an old node file is missing. */ }
   }))
