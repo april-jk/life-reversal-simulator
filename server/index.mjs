@@ -32,7 +32,9 @@ function sessionPath(id) { return join(sessionsDir, id) }
 function manifestPath(id) { return join(sessionPath(id), 'manifest.json') }
 function nodePath(id, nodeId) { return join(sessionPath(id), 'nodes', `${nodeId}.json`) }
 async function readProfiles() {
-  try { return JSON.parse(await readFile(profilesPath, 'utf8')) } catch (error) { if (error?.code === 'ENOENT') return []; throw error }
+  try {
+    return JSON.parse(await readFile(profilesPath, 'utf8')).map((profile) => ({ ...profile, birth_date: profile.birth_date || profile.birth_datetime?.slice(0, 10) || '', birth_time: profile.birth_time || profile.birth_datetime?.slice(11, 16) || '' }))
+  } catch (error) { if (error?.code === 'ENOENT') return []; throw error }
 }
 async function writeProfiles(profiles) { await mkdir(sessionsDir, { recursive: true }); await writeFile(profilesPath, JSON.stringify(profiles, null, 2)) }
 async function profileFor(profileId) { return profileId ? (await readProfiles()).find((profile) => profile.id === profileId) || null : null }
@@ -100,7 +102,7 @@ async function ask(instruction, schema) {
 }
 function prompt(kind, path, extra = '', profile = null) {
   const context = JSON.stringify(path)
-  const personalContext = profile ? `用户已绑定的个人资料是：${JSON.stringify({ nickname: profile.nickname, birthplace: profile.birthplace, family_situation: profile.family_situation, birth_datetime: profile.birth_datetime, school: profile.school, preferences: profile.preferences })}。仅可用这些已提供信息调整建议的侧重点，不得臆测或补全缺失信息。` : '用户未绑定个人资料，不要假设其背景。'
+  const personalContext = profile ? `用户已绑定的个人资料是：${JSON.stringify({ nickname: profile.nickname, birthplace: profile.birthplace, family_situation: profile.family_situation, birth_date: profile.birth_date, birth_time: profile.birth_time, school: profile.school, preferences: profile.preferences })}。仅可用这些已提供信息调整建议的侧重点，不得臆测或补全缺失信息。` : '用户未绑定个人资料，不要假设其背景。'
   const common = `合法路径上下文仅为：${context}。${personalContext}不得提及或推断任何其他分支。所有 time_offset 必须是相对根节点、格式 +N个月，且严格大于当前节点的时间偏移。${extra}`
   if (kind === 'branch') return `基于用户抉择生成 ${extra || '2 到 3'} 个可执行选择分支。${common}\n返回 {"branches":[{"title":"","summary":"","time_offset":"+N个月"}]}`
   if (kind === 'difficulty') return `为这条路径生成 ${extra || '3'} 个高频且具体、可应对的困难。至少 2 个 frequency=high，最多 1 个 medium；禁止极端事件。cause 必须是明确因果链。${common}\n返回 {"difficulties":[{"title":"","description":"","cause":"","frequency":"high","impact":"medium","time_offset":"+N个月"}]}`
@@ -136,7 +138,7 @@ async function generateResponseStrategy(id, difficultyId) {
   const profile = await profileFor(manifest.profile_id)
   const response = await createNode(id, manifest, difficulty, { type: 'response', depth: 2, status: 'pending', title: '正在生成应对策略…', source: 'agent' }); await writeManifest(id, manifest)
   try {
-    const personalContext = profile ? `用户已绑定的个人资料是：${JSON.stringify({ nickname: profile.nickname, birthplace: profile.birthplace, family_situation: profile.family_situation, birth_datetime: profile.birth_datetime, school: profile.school, preferences: profile.preferences })}。仅可用已提供信息调整建议，不得补全缺失背景。` : '用户未绑定个人资料。'
+    const personalContext = profile ? `用户已绑定的个人资料是：${JSON.stringify({ nickname: profile.nickname, birthplace: profile.birthplace, family_situation: profile.family_situation, birth_date: profile.birth_date, birth_time: profile.birth_time, school: profile.school, preferences: profile.preferences })}。仅可用已提供信息调整建议，不得补全缺失背景。` : '用户未绑定个人资料。'
     const result = await ask(`基于这个困难和路径，提出一个具体、可执行、不过度承诺的应对策略。合法路径上下文仅为：${JSON.stringify(difficultyFile.path_summary)}。${personalContext}不得提及或推断其他分支。只返回 {"response":{"text":""}}`, responseStrategySchema)
     const latest = await readManifest(id); const latestResponse = find(latest, response.id); const responseFile = await readNode(id, response.id); Object.assign(latestResponse, { status: 'active', title: 'AI 建议的应对', detail: result.response.text }); Object.assign(responseFile, { status: 'active', title: 'AI 建议的应对', source: 'agent', content: { text: result.response.text }, agent_meta: { call: 'response_strategy_gen', generated_at: stamp() } }); await writeNode(id, responseFile); await preparePending(id, latest, latestResponse, 'situation', 3, 3); await writeManifest(id, latest); void generate(id, latestResponse.id, 'situation', 3, result.response.text)
   } catch (error) { const latest = await readManifest(id); const failed = find(latest, response.id); failed.status = 'error'; const file = await readNode(id, response.id); file.status = 'error'; file.content = { error: error.message }; await writeNode(id, file); await writeManifest(id, latest) }
@@ -171,7 +173,7 @@ const server = createServer(async (req, res) => {
     if (req.method === 'GET' && path.join('/') === 'api/profiles') { json(res); return res.end(JSON.stringify(await readProfiles())) }
     if (req.method === 'POST' && path.join('/') === 'api/profiles') {
       const data = await body(req)
-      const profile = z.object({ nickname: z.string().trim().min(1).max(40), birthplace: z.string().trim().max(100).optional().default(''), family_situation: z.string().trim().max(500).optional().default(''), birth_datetime: z.string().trim().max(32).optional().default(''), school: z.string().trim().max(120).optional().default(''), preferences: z.string().trim().max(300).optional().default('') }).parse(data)
+      const profile = z.object({ nickname: z.string().trim().min(1, '请填写昵称').max(40), birthplace: z.string().trim().max(100).optional().default(''), family_situation: z.string().trim().max(500).optional().default(''), birth_date: z.string({ required_error: '出生年月日不能为空' }).regex(/^\d{4}-\d{2}-\d{2}$/, '出生年月日格式不正确'), birth_time: z.string().regex(/^$|^\d{2}:\d{2}$/, '出生时间格式不正确').optional().default(''), school: z.string().trim().max(120).optional().default(''), preferences: z.string().trim().max(300).optional().default('') }).parse(data)
       const profiles = await readProfiles(); const created = { id: `profile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, ...profile, created_at: stamp() }; profiles.unshift(created); await writeProfiles(profiles); json(res, 201); return res.end(JSON.stringify(created))
     }
     if (req.method === 'GET' && path.join('/') === 'api/sessions') { json(res); return res.end(JSON.stringify(await listSessions())) }
@@ -194,6 +196,6 @@ const server = createServer(async (req, res) => {
     if (req.method === 'POST' && path[3] === 'nodes' && path[5] === 'restore') { const manifest = await readManifest(id); const node = find(manifest, path[4]); await restoreSubtree(id, manifest, node); manifest.reverse_history.push({ at_node: node.id, restored_at: stamp(), restored_subtree_root: node.id }); await writeManifest(id, manifest); json(res); return res.end('{}') }
     if (req.method === 'GET' && path[0] !== 'api') return await serveApp(req, res, url.pathname)
     json(res, 404); res.end(JSON.stringify({ error: 'Not found' }))
-  } catch (error) { json(res, 500); res.end(JSON.stringify({ error: error.message })) }
+  } catch (error) { json(res, error instanceof z.ZodError ? 400 : 500); res.end(JSON.stringify({ error: error instanceof z.ZodError ? error.issues[0]?.message || '请求参数不正确' : error.message })) }
 })
 server.listen(port, () => console.log(`Life simulator API listening on http://localhost:${port}`))
