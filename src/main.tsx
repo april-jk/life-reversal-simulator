@@ -27,6 +27,7 @@ import './reverse-restore.css'
 import './keyboard-nav.css'
 import './draft-node.css'
 import './profile-dock.css'
+import './mobile.css'
 import App from './App'
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>)
