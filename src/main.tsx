@@ -25,6 +25,7 @@ import './sibling-layer.css'
 import './reverse-recovery.css'
 import './reverse-restore.css'
 import './keyboard-nav.css'
+import './draft-node.css'
 import App from './App'
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>)
