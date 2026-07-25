@@ -101,13 +101,16 @@ async function generate(id, parentId, kind, count = 3, responseText = '') {
     if (kind === 'situation') result = await ask(prompt('situation', parentFile.path_summary, `用户的应对是：${responseText}`), situationSchema)
     if (kind === 'outcome') result = await ask(prompt('outcome', parentFile.path_summary), outcomeSchema)
     const items = kind === 'branch' ? result.branches : kind === 'difficulty' ? result.difficulties : kind === 'situation' ? result.situations : [result.outcome]
-    const pending = parent.children.map((childId) => find(manifest, childId)).filter((child) => child.status === 'pending' && child.type === (kind === 'branch' ? 'branch' : kind === 'difficulty' ? 'difficulty' : kind === 'situation' ? 'situation' : 'outcome'))
+    // Other generation calls may have completed while this model request was in flight.
+    // Re-read the manifest so this call cannot restore an older snapshot over them.
+    const latestManifest = await readManifest(id); const latestParent = find(latestManifest, parentId)
+    const pending = latestParent.children.map((childId) => find(latestManifest, childId)).filter((child) => child.status === 'pending' && child.type === (kind === 'branch' ? 'branch' : kind === 'difficulty' ? 'difficulty' : kind === 'situation' ? 'situation' : 'outcome'))
     for (const [index, item] of items.entries()) {
-      const record = pending[index] || await createNode(id, manifest, parent, { type: kind === 'branch' ? 'branch' : kind === 'difficulty' ? 'difficulty' : kind === 'situation' ? 'situation' : 'outcome', depth: kind === 'branch' ? 1 : kind === 'difficulty' ? 2 : kind === 'situation' ? 3 : 4, status: 'pending', title: '推演中…' })
+      const record = pending[index] || await createNode(id, latestManifest, latestParent, { type: kind === 'branch' ? 'branch' : kind === 'difficulty' ? 'difficulty' : kind === 'situation' ? 'situation' : 'outcome', depth: kind === 'branch' ? 1 : kind === 'difficulty' ? 2 : kind === 'situation' ? 3 : 4, status: 'pending', title: '推演中…' })
       const file = await readNode(id, record.id); const offset = item.time_offset || `+${offsetMonths(parentFile.content.time_offset) + 6}个月`; const content = kind === 'outcome' ? { summary: item.summary, time_label: labelFor(manifest.root.time_anchor, offset) } : { ...item, time_label: labelFor(manifest.root.time_anchor, offset) }
       Object.assign(record, { status: 'active', title: item.title || '阶段性结局', time_label: content.time_label }); Object.assign(file, { status: 'active', title: record.title, content, source: 'agent', agent_meta: { call: `${kind}_gen`, generated_at: stamp() } }); await writeNode(id, file)
     }
-    await writeManifest(id, manifest)
+    await writeManifest(id, latestManifest)
   } catch (error) {
     const latest = await readManifest(id); for (const child of latest.nodes.filter((node) => node.parent === parentId && node.status === 'pending')) { child.status = 'error'; const file = await readNode(id, child.id); file.status = 'error'; file.content = { error: error.message }; await writeNode(id, file) } await writeManifest(id, latest)
   }
