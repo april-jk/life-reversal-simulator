@@ -4,7 +4,7 @@ import { extname, join } from 'node:path'
 import { z } from 'zod'
 
 const port = Number(process.env.PORT || process.env.SERVER_PORT || 8787)
-const sessionsDir = join(process.cwd(), 'life-sessions')
+const sessionsDir = process.env.SESSIONS_DIR || join(process.cwd(), 'life-sessions')
 const distDir = join(process.cwd(), 'dist')
 const apiKey = process.env.ZHIPU_API_KEY
 const model = process.env.ZHIPU_MODEL || 'glm-5'
