@@ -60,6 +60,11 @@ async function retireDescendants(id, manifest, node) {
     await retireDescendants(id, manifest, child)
   }
 }
+async function restoreSubtree(id, manifest, node) {
+  node.status = 'active'
+  const file = await readNode(id, node.id); file.status = 'active'; await writeNode(id, file)
+  for (const childId of node.children) await restoreSubtree(id, manifest, find(manifest, childId))
+}
 async function preparePending(id, manifest, parent, type, depth, count) {
   for (let index = 0; index < count; index += 1) await createNode(id, manifest, parent, { type, depth, status: 'pending', title: '推演中…' })
 }
@@ -147,6 +152,7 @@ const server = createServer(async (req, res) => {
     if (req.method === 'POST' && path[3] === 'responses' && path[5] === 'manual-situation') { const manifest = await readManifest(id); const response = find(manifest, path[4]); const responseFile = await readNode(id, response.id); const offset = `+${offsetMonths(responseFile.content.time_offset) + 3}个月`; await createNode(id, manifest, response, { type: 'situation', depth: 3, title: data.title, source: 'user', content: { description: data.description || data.title, trend: 'neutral', time_offset: offset, time_label: labelFor(manifest.root.time_anchor, offset) } }); await writeManifest(id, manifest); json(res, 201); return res.end('{}') }
     if (req.method === 'POST' && path[3] === 'situations' && path[5] === 'activate') { const manifest = await readManifest(id); const situation = find(manifest, path[4]); await preparePending(id, manifest, situation, 'outcome', 4, 1); await writeManifest(id, manifest); void generate(id, path[4], 'outcome'); json(res, 202); return res.end('{}') }
     if (req.method === 'POST' && path[3] === 'nodes' && path[5] === 'reverse') { const manifest = await readManifest(id); const node = find(manifest, path[4]); await retireDescendants(id, manifest, node); manifest.reverse_history.push({ at_node: node.id, reversed_at: stamp(), retired_subtree_root: node.children[0] || null, new_chain_from: node.id }); await writeManifest(id, manifest); json(res); return res.end('{}') }
+    if (req.method === 'POST' && path[3] === 'nodes' && path[5] === 'restore') { const manifest = await readManifest(id); const node = find(manifest, path[4]); await restoreSubtree(id, manifest, node); manifest.reverse_history.push({ at_node: node.id, restored_at: stamp(), restored_subtree_root: node.id }); await writeManifest(id, manifest); json(res); return res.end('{}') }
     json(res, 404); res.end(JSON.stringify({ error: 'Not found' }))
   } catch (error) { json(res, 500); res.end(JSON.stringify({ error: error.message })) }
 })
