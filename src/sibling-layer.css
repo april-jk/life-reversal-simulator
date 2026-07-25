@@ -1,1 +1,1 @@
-.react-flow__node:has(.hover-add.expanded){z-index:1000!important}.hover-add.expanded{z-index:1001}.hover-add-options{z-index:1002}
+.react-flow__node:has(.node-hover-actions:hover),.react-flow__node:has(.node-manual-popover){z-index:1000!important}.node-hover-actions{z-index:1001}.node-manual-popover{z-index:1002}
