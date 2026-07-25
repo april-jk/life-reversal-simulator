@@ -1,13 +1,15 @@
 import { createServer } from 'node:http'
 import { mkdir, readFile, writeFile, readdir } from 'node:fs/promises'
-import { join } from 'node:path'
+import { extname, join } from 'node:path'
 import { z } from 'zod'
 
-const port = Number(process.env.SERVER_PORT || 8787)
+const port = Number(process.env.PORT || process.env.SERVER_PORT || 8787)
 const sessionsDir = join(process.cwd(), 'life-sessions')
+const distDir = join(process.cwd(), 'dist')
 const apiKey = process.env.ZHIPU_API_KEY
 const model = process.env.ZHIPU_MODEL || 'glm-5'
 const json = (response, status = 200) => response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' })
+const assetTypes = { '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.ico': 'image/x-icon', '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.map': 'application/json; charset=utf-8', '.svg': 'image/svg+xml', '.woff2': 'font/woff2' }
 const stamp = () => new Date().toISOString()
 const dateStamp = () => stamp().slice(0, 10).replaceAll('-', '')
 
@@ -136,6 +138,21 @@ async function createSession(question) {
   await writeManifest(id, manifest); void generate(id, root.id, 'branch'); return manifest
 }
 async function body(req) { let raw = ''; for await (const chunk of req) raw += chunk; return raw ? JSON.parse(raw) : {} }
+async function serveApp(req, res, pathname) {
+  const relativePath = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '')
+  const assetPath = join(distDir, relativePath)
+  if (!assetPath.startsWith(`${distDir}/`)) throw new Error('Invalid asset path')
+  try {
+    const asset = await readFile(assetPath)
+    res.writeHead(200, { 'Content-Type': assetTypes[extname(assetPath)] || 'application/octet-stream' })
+    return res.end(asset)
+  } catch {
+    if (extname(relativePath)) throw new Error('Not found')
+    const app = await readFile(join(distDir, 'index.html'))
+    res.writeHead(200, { 'Content-Type': assetTypes['.html'] })
+    return res.end(app)
+  }
+}
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`); const path = url.pathname.split('/').filter(Boolean)
@@ -154,6 +171,7 @@ const server = createServer(async (req, res) => {
     if (req.method === 'POST' && path[3] === 'situations' && path[5] === 'activate') { const manifest = await readManifest(id); const situation = find(manifest, path[4]); await preparePending(id, manifest, situation, 'outcome', 4, 1); await writeManifest(id, manifest); void generate(id, path[4], 'outcome'); json(res, 202); return res.end('{}') }
     if (req.method === 'POST' && path[3] === 'nodes' && path[5] === 'reverse') { const manifest = await readManifest(id); const node = find(manifest, path[4]); await retireDescendants(id, manifest, node); manifest.reverse_history.push({ at_node: node.id, reversed_at: stamp(), retired_subtree_root: node.children[0] || null, new_chain_from: node.id }); await writeManifest(id, manifest); json(res); return res.end('{}') }
     if (req.method === 'POST' && path[3] === 'nodes' && path[5] === 'restore') { const manifest = await readManifest(id); const node = find(manifest, path[4]); await restoreSubtree(id, manifest, node); manifest.reverse_history.push({ at_node: node.id, restored_at: stamp(), restored_subtree_root: node.id }); await writeManifest(id, manifest); json(res); return res.end('{}') }
+    if (req.method === 'GET' && path[0] !== 'api') return serveApp(req, res, url.pathname)
     json(res, 404); res.end(JSON.stringify({ error: 'Not found' }))
   } catch (error) { json(res, 500); res.end(JSON.stringify({ error: error.message })) }
 })
