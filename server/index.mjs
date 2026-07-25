@@ -5,6 +5,7 @@ import { z } from 'zod'
 
 const port = Number(process.env.PORT || process.env.SERVER_PORT || 8787)
 const sessionsDir = process.env.SESSIONS_DIR || join(process.cwd(), 'life-sessions')
+const profilesPath = join(sessionsDir, 'profiles.json')
 const distDir = join(process.cwd(), 'dist')
 const apiKey = process.env.DEEPSEEK_API_KEY
 const model = process.env.DEEPSEEK_MODEL || 'deepseek-v4-flash'
@@ -30,6 +31,11 @@ function ageFrom(question) { return Number(question.match(/(?:我现在|今年|�
 function sessionPath(id) { return join(sessionsDir, id) }
 function manifestPath(id) { return join(sessionPath(id), 'manifest.json') }
 function nodePath(id, nodeId) { return join(sessionPath(id), 'nodes', `${nodeId}.json`) }
+async function readProfiles() {
+  try { return JSON.parse(await readFile(profilesPath, 'utf8')) } catch (error) { if (error?.code === 'ENOENT') return []; throw error }
+}
+async function writeProfiles(profiles) { await mkdir(sessionsDir, { recursive: true }); await writeFile(profilesPath, JSON.stringify(profiles, null, 2)) }
+async function profileFor(profileId) { return profileId ? (await readProfiles()).find((profile) => profile.id === profileId) || null : null }
 async function readManifest(id) {
   const manifest = JSON.parse(await readFile(manifestPath(id), 'utf8'))
   await Promise.all(manifest.nodes.filter((node) => node.type === 'response' && !node.detail).map(async (node) => {
@@ -92,9 +98,10 @@ async function ask(instruction, schema) {
   }
   throw lastError
 }
-function prompt(kind, path, extra = '') {
+function prompt(kind, path, extra = '', profile = null) {
   const context = JSON.stringify(path)
-  const common = `合法上下文仅为：${context}。不得提及或推断任何其他分支。所有 time_offset 必须是相对根节点、格式 +N个月，且严格大于当前节点的时间偏移。${extra}`
+  const personalContext = profile ? `用户已绑定的个人资料是：${JSON.stringify({ nickname: profile.nickname, birthplace: profile.birthplace, family_situation: profile.family_situation, birth_datetime: profile.birth_datetime, school: profile.school, preferences: profile.preferences })}。仅可用这些已提供信息调整建议的侧重点，不得臆测或补全缺失信息。` : '用户未绑定个人资料，不要假设其背景。'
+  const common = `合法路径上下文仅为：${context}。${personalContext}不得提及或推断任何其他分支。所有 time_offset 必须是相对根节点、格式 +N个月，且严格大于当前节点的时间偏移。${extra}`
   if (kind === 'branch') return `基于用户抉择生成 ${extra || '2 到 3'} 个可执行选择分支。${common}\n返回 {"branches":[{"title":"","summary":"","time_offset":"+N个月"}]}`
   if (kind === 'difficulty') return `为这条路径生成 ${extra || '3'} 个高频且具体、可应对的困难。至少 2 个 frequency=high，最多 1 个 medium；禁止极端事件。cause 必须是明确因果链。${common}\n返回 {"difficulties":[{"title":"","description":"","cause":"","frequency":"high","impact":"medium","time_offset":"+N个月"}]}`
   if (kind === 'situation') return `根据用户应对推演指定数量的后续局面，平衡呈现 better/worse/neutral 走向。${common}\n返回 {"situations":[{"title":"","description":"","trend":"neutral","time_offset":"+N个月"}]}`
@@ -102,12 +109,13 @@ function prompt(kind, path, extra = '') {
 }
 async function generate(id, parentId, kind, count = 3, responseText = '') {
   const manifest = await readManifest(id); const parent = find(manifest, parentId); const parentFile = await readNode(id, parentId)
+  const profile = await profileFor(manifest.profile_id)
   try {
     let result
-    if (kind === 'branch') result = await ask(prompt('branch', parentFile.path_summary, count === 1 ? '1' : '2 到 3'), branchSchema)
-    if (kind === 'difficulty') result = await ask(prompt('difficulty', parentFile.path_summary, count === 1 ? '1' : '3'), difficultySchema)
-    if (kind === 'situation') result = await ask(prompt('situation', parentFile.path_summary, `用户的应对是：${responseText}。只生成 ${count} 个局面。`), situationSchema)
-    if (kind === 'outcome') result = await ask(prompt('outcome', parentFile.path_summary), outcomeSchema)
+    if (kind === 'branch') result = await ask(prompt('branch', parentFile.path_summary, count === 1 ? '1' : '2 到 3', profile), branchSchema)
+    if (kind === 'difficulty') result = await ask(prompt('difficulty', parentFile.path_summary, count === 1 ? '1' : '3', profile), difficultySchema)
+    if (kind === 'situation') result = await ask(prompt('situation', parentFile.path_summary, `用户的应对是：${responseText}。只生成 ${count} 个局面。`, profile), situationSchema)
+    if (kind === 'outcome') result = await ask(prompt('outcome', parentFile.path_summary, '', profile), outcomeSchema)
     const items = kind === 'branch' ? result.branches : kind === 'difficulty' ? result.difficulties : kind === 'situation' ? result.situations : [result.outcome]
     // Other generation calls may have completed while this model request was in flight.
     // Re-read the manifest so this call cannot restore an older snapshot over them.
@@ -125,14 +133,18 @@ async function generate(id, parentId, kind, count = 3, responseText = '') {
 }
 async function generateResponseStrategy(id, difficultyId) {
   const manifest = await readManifest(id); const difficulty = find(manifest, difficultyId); const difficultyFile = await readNode(id, difficultyId)
+  const profile = await profileFor(manifest.profile_id)
   const response = await createNode(id, manifest, difficulty, { type: 'response', depth: 2, status: 'pending', title: '正在生成应对策略…', source: 'agent' }); await writeManifest(id, manifest)
   try {
-    const result = await ask(`基于这个困难和路径，提出一个具体、可执行、不过度承诺的应对策略。合法上下文仅为：${JSON.stringify(difficultyFile.path_summary)}。只返回 {"response":{"text":""}}`, responseStrategySchema)
+    const personalContext = profile ? `用户已绑定的个人资料是：${JSON.stringify({ nickname: profile.nickname, birthplace: profile.birthplace, family_situation: profile.family_situation, birth_datetime: profile.birth_datetime, school: profile.school, preferences: profile.preferences })}。仅可用已提供信息调整建议，不得补全缺失背景。` : '用户未绑定个人资料。'
+    const result = await ask(`基于这个困难和路径，提出一个具体、可执行、不过度承诺的应对策略。合法路径上下文仅为：${JSON.stringify(difficultyFile.path_summary)}。${personalContext}不得提及或推断其他分支。只返回 {"response":{"text":""}}`, responseStrategySchema)
     const latest = await readManifest(id); const latestResponse = find(latest, response.id); const responseFile = await readNode(id, response.id); Object.assign(latestResponse, { status: 'active', title: 'AI 建议的应对', detail: result.response.text }); Object.assign(responseFile, { status: 'active', title: 'AI 建议的应对', source: 'agent', content: { text: result.response.text }, agent_meta: { call: 'response_strategy_gen', generated_at: stamp() } }); await writeNode(id, responseFile); await preparePending(id, latest, latestResponse, 'situation', 3, 3); await writeManifest(id, latest); void generate(id, latestResponse.id, 'situation', 3, result.response.text)
   } catch (error) { const latest = await readManifest(id); const failed = find(latest, response.id); failed.status = 'error'; const file = await readNode(id, response.id); file.status = 'error'; file.content = { error: error.message }; await writeNode(id, file); await writeManifest(id, latest) }
 }
-async function createSession(question) {
-  const id = `life-session-${dateStamp()}-${Math.random().toString(36).slice(2, 6)}`; const anchor = stamp().slice(0, 10); const manifest = { session_id: id, created_at: stamp(), root: { node_id: 'n001', time_anchor: anchor, age_anchor: ageFrom(question) }, nodes: [], reverse_history: [] }
+async function createSession(question, profileId = null) {
+  const profile = await profileFor(profileId)
+  if (profileId && !profile) throw new Error('要绑定的个人档案不存在')
+  const id = `life-session-${dateStamp()}-${Math.random().toString(36).slice(2, 6)}`; const anchor = stamp().slice(0, 10); const manifest = { session_id: id, created_at: stamp(), profile_id: profile?.id || null, root: { node_id: 'n001', time_anchor: anchor, age_anchor: ageFrom(question) }, nodes: [], reverse_history: [] }
   await mkdir(join(sessionPath(id), 'nodes'), { recursive: true }); const root = await createNode(id, manifest, null, { type: 'decision', depth: 0, title: question, content: { question, user_age: manifest.root.age_anchor }, brief: question.slice(0, 30) }); manifest.root.node_id = root.id
   await preparePending(id, manifest, root, 'branch', 1, 3)
   await writeManifest(id, manifest); void generate(id, root.id, 'branch'); return manifest
@@ -147,7 +159,7 @@ async function serveApp(req, res, pathname) {
     res.writeHead(200, { 'Content-Type': assetTypes[extname(assetPath)] || 'application/octet-stream' })
     return res.end(asset)
   } catch {
-    if (extname(relativePath)) throw new Error('Not found')
+    if (extname(relativePath)) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('Not found') }
     const app = await readFile(join(distDir, 'index.html'))
     res.writeHead(200, { 'Content-Type': assetTypes['.html'] })
     return res.end(app)
@@ -156,11 +168,18 @@ async function serveApp(req, res, pathname) {
 const server = createServer(async (req, res) => {
   try {
     const url = new URL(req.url, `http://${req.headers.host}`); const path = url.pathname.split('/').filter(Boolean)
+    if (req.method === 'GET' && path.join('/') === 'api/profiles') { json(res); return res.end(JSON.stringify(await readProfiles())) }
+    if (req.method === 'POST' && path.join('/') === 'api/profiles') {
+      const data = await body(req)
+      const profile = z.object({ nickname: z.string().trim().min(1).max(40), birthplace: z.string().trim().max(100).optional().default(''), family_situation: z.string().trim().max(500).optional().default(''), birth_datetime: z.string().trim().max(32).optional().default(''), school: z.string().trim().max(120).optional().default(''), preferences: z.string().trim().max(300).optional().default('') }).parse(data)
+      const profiles = await readProfiles(); const created = { id: `profile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`, ...profile, created_at: stamp() }; profiles.unshift(created); await writeProfiles(profiles); json(res, 201); return res.end(JSON.stringify(created))
+    }
     if (req.method === 'GET' && path.join('/') === 'api/sessions') { json(res); return res.end(JSON.stringify(await listSessions())) }
     if (req.method === 'GET' && path[0] === 'api' && path[1] === 'sessions' && path[2] && path.length === 3) { json(res); return res.end(JSON.stringify(await readManifest(path[2]))) }
     if (req.method === 'GET' && path[0] === 'api' && path[1] === 'sessions' && path[2] && path[3] === 'nodes' && path[4]) { json(res); return res.end(JSON.stringify(await readNode(path[2], path[4]))) }
-    if (req.method === 'POST' && path.join('/') === 'api/sessions') { const data = await body(req); json(res, 201); return res.end(JSON.stringify(await createSession(data.question))) }
+    if (req.method === 'POST' && path.join('/') === 'api/sessions') { const data = await body(req); json(res, 201); return res.end(JSON.stringify(await createSession(data.question, data.profile_id || null))) }
     const id = path[2]; const data = req.method === 'POST' ? await body(req) : {}
+    if (req.method === 'POST' && path[3] === 'profile') { const manifest = await readManifest(id); const profile = await profileFor(data.profile_id || null); if (data.profile_id && !profile) throw new Error('要绑定的个人档案不存在'); manifest.profile_id = profile?.id || null; await writeManifest(id, manifest); json(res); return res.end(JSON.stringify(manifest)) }
     if (req.method === 'POST' && path[3] === 'branches' && path[5] === 'generate') { const manifest = await readManifest(id); const parent = find(manifest, path[4]); await preparePending(id, manifest, parent, 'difficulty', 2, data.count === 1 ? 1 : 3); await writeManifest(id, manifest); void generate(id, path[4], 'difficulty', data.count === 1 ? 1 : 3); json(res, 202); return res.end('{}') }
     if (req.method === 'POST' && path[3] === 'decisions' && path[5] === 'generate-branch') { const manifest = await readManifest(id); const parent = find(manifest, path[4]); await preparePending(id, manifest, parent, 'branch', 1, 1); await writeManifest(id, manifest); void generate(id, path[4], 'branch', 1); json(res, 202); return res.end('{}') }
     if (req.method === 'POST' && path[3] === 'decisions' && path[5] === 'manual-branch') { const manifest = await readManifest(id); const parent = find(manifest, path[4]); const offset = '+1个月'; await createNode(id, manifest, parent, { type: 'branch', depth: 1, title: data.title, source: 'user', content: { summary: data.title, time_offset: offset, time_label: labelFor(manifest.root.time_anchor, offset) } }); await writeManifest(id, manifest); json(res, 201); return res.end('{}') }
@@ -173,7 +192,7 @@ const server = createServer(async (req, res) => {
     if (req.method === 'POST' && path[3] === 'situations' && path[5] === 'manual-outcome') { const manifest = await readManifest(id); const situation = find(manifest, path[4]); const situationFile = await readNode(id, situation.id); const offset = `+${offsetMonths(situationFile.content.time_offset) + 3}个月`; await createNode(id, manifest, situation, { type: 'outcome', depth: 4, title: '阶段性结局', source: 'user', content: { summary: data.summary, time_label: labelFor(manifest.root.time_anchor, offset) } }); await writeManifest(id, manifest); json(res, 201); return res.end('{}') }
     if (req.method === 'POST' && path[3] === 'nodes' && path[5] === 'reverse') { const manifest = await readManifest(id); const node = find(manifest, path[4]); await retireDescendants(id, manifest, node); manifest.reverse_history.push({ at_node: node.id, reversed_at: stamp(), retired_subtree_root: node.children[0] || null, new_chain_from: node.id }); await writeManifest(id, manifest); json(res); return res.end('{}') }
     if (req.method === 'POST' && path[3] === 'nodes' && path[5] === 'restore') { const manifest = await readManifest(id); const node = find(manifest, path[4]); await restoreSubtree(id, manifest, node); manifest.reverse_history.push({ at_node: node.id, restored_at: stamp(), restored_subtree_root: node.id }); await writeManifest(id, manifest); json(res); return res.end('{}') }
-    if (req.method === 'GET' && path[0] !== 'api') return serveApp(req, res, url.pathname)
+    if (req.method === 'GET' && path[0] !== 'api') return await serveApp(req, res, url.pathname)
     json(res, 404); res.end(JSON.stringify({ error: 'Not found' }))
   } catch (error) { json(res, 500); res.end(JSON.stringify({ error: error.message })) }
 })
